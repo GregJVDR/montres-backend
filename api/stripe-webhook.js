@@ -1,27 +1,6 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-function formatOrderText(cartItems) {
-  // ton cart_json ressemble à un tableau avec 1 objet, mais on gère les 2 cas
-  const items = Array.isArray(cartItems) ? cartItems : [cartItems];
-
-  return items.map((item, idx) => {
-    const lines = [];
-    lines.push(`Article #${idx + 1}`);
-    lines.push(`Modèle: ${item.type || item.model || "?"}`);
-    lines.push(`Total: ${item.total ? item.total + " €" : "?"}`);
-    const el = item.elements || item; // selon ton json
-    lines.push(`Carrure: ${el.carrure || "?"}`);
-    lines.push(`Cadran: ${el.cadran || "?"}`);
-    lines.push(`Aiguilles: ${el.aiguilles || "?"}`);
-    lines.push(`Bracelet: ${el.bracelet || "?"}`);
-    lines.push(`Fond: ${el.fond || "?"}`);
-    lines.push(`Remontoir: ${el.remontoir || "?"}`);
-    return lines.join("\n");
-  }).join("\n\n");
-}
 
 export const config = {
   api: { bodyParser: false } // IMPORTANT pour vérifier la signature Stripe
@@ -34,10 +13,33 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+const resend = new Resend(process.env.RESEND_API_KEY);
+
 async function readRawBody(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks);
+}
+
+function formatPieces(cartItems) {
+  const items = Array.isArray(cartItems) ? cartItems : [cartItems];
+
+  return items
+    .map((item, idx) => {
+      const el = item?.elements || item || {};
+      return [
+        `Article #${idx + 1}`,
+        `Modèle: ${item?.type || "?"}`,
+        `Total: ${item?.total ? item.total + " €" : "?"}`,
+        `Carrure: ${el.carrure || "?"}`,
+        `Cadran: ${el.cadran || "?"}`,
+        `Aiguilles: ${el.aiguilles || "?"}`,
+        `Bracelet: ${el.bracelet || "?"}`,
+        `Fond: ${el.fond || "?"}`,
+        `Remontoir: ${el.remontoir || "?"}`
+      ].join("\n");
+    })
+    .join("\n\n");
 }
 
 export default async function handler(req, res) {
@@ -56,31 +58,54 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Paiement réussi
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
 
-      // panier récupéré depuis metadata
       let cartItems = [];
       try {
         cartItems = JSON.parse(session?.metadata?.cart || "[]");
       } catch (_) {}
 
-      const amountTotal = session.amount_total; // en centimes
-      const currency = session.currency || "eur";
+      const amountTotal = session.amount_total; // centimes
+      const currency = (session.currency || "eur").toUpperCase();
       const customerEmail = session.customer_details?.email || null;
 
-      // Insert uniquement après paiement
+      // 1) Insert Supabase (commande payée)
       const { error } = await supabase.from("orders").insert({
         status: "paid",
         amount_total: amountTotal,
-        currency,
+        currency: currency.toLowerCase(),
         cart_json: cartItems,
         customer_email: customerEmail,
         stripe_session_id: session.id
       });
 
       if (error) throw error;
+
+      // 2) Email admin
+      const piecesText = formatPieces(cartItems);
+
+      await resend.emails.send({
+        from: process.env.EMAIL_FROM || "KairoMod <onboarding@resend.dev>",
+        to: (process.env.EMAIL_TO || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        subject: `Nouvelle commande payée - ${amountTotal / 100} ${currency}`,
+        text: [
+          `Paiement confirmé (Stripe Checkout).`,
+          ``,
+          `Email client: ${customerEmail || "non fourni"}`,
+          `Session Stripe: ${session.id}`,
+          `Montant: ${amountTotal / 100} ${currency}`,
+          ``,
+          `Récap des pièces:`,
+          piecesText,
+          ``,
+          `JSON brut:`,
+          JSON.stringify(cartItems, null, 2)
+        ].join("\n")
+      });
     }
 
     return res.json({ received: true });
@@ -88,20 +113,4 @@ export default async function handler(req, res) {
     console.error(e);
     return res.status(500).send("Webhook handler failed");
   }
-  const summary = formatOrderText(cartItems);
-
-await resend.emails.send({
-  from: process.env.EMAIL_FROM || "KairoMod <onboarding@resend.dev>",
-  to: (process.env.EMAIL_TO || "").split(",").map(s => s.trim()).filter(Boolean),
-  subject: `Nouvelle commande payée - ${amountTotal / 100} ${currency.toUpperCase()}`,
-  text:
-`Paiement confirmé.
-
-Email client: ${customerEmail || "non fourni"}
-Session Stripe: ${session.id}
-
-Récap des pièces:
-${summary}
-`
-});
 }
