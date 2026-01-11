@@ -90,19 +90,24 @@ export default async function handler(req, res) {
   orderId: session.id,
   customerEmail,
   currency,
-  amountTotal,
+  totalEUR: amountTotal / 100, // ✅ CORRECT
   items: Array.isArray(cartItems) ? cartItems : [cartItems]
 });
 
-await resend.emails.send({
-  from: process.env.EMAIL_FROM || "KairoMod <contact@kairomod.fr>",
-  to: (process.env.EMAIL_TO || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean),
-  subject: `Nouvelle commande payée – ${amountTotal / 100} ${currency}`,
-  html
-});
+try {
+  await resend.emails.send({
+    from: process.env.EMAIL_FROM || "KairoMod <contact@kairomod.fr>",
+    to: (process.env.EMAIL_TO || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+    subject: `Nouvelle commande payée – ${amountTotal / 100} ${currency}`,
+    html
+  });
+} catch (emailError) {
+  console.error("EMAIL FAILED", emailError);
+  // ⚠️ on NE throw PAS
+}
     }
 
     return res.json({ received: true });
