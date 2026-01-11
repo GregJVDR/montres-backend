@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
+import { buildOrderEmailHtml } from "./email-template";
 
 export const config = {
   api: { bodyParser: false } // IMPORTANT pour vérifier la signature Stripe
@@ -83,29 +84,25 @@ export default async function handler(req, res) {
       if (error) throw error;
 
       // 2) Email admin
-      const piecesText = formatPieces(cartItems);
+      const html = buildOrderEmailHtml({
+  brandName: "KairoMod",
+  logoUrl: "https://kairomod.fr/images/logo.png", // adapte si besoin
+  orderId: session.id,
+  customerEmail,
+  currency,
+  amountTotal,
+  items: Array.isArray(cartItems) ? cartItems : [cartItems]
+});
 
-      await resend.emails.send({
-        from: process.env.EMAIL_FROM || "KairoMod <onboarding@resend.dev>",
-        to: (process.env.EMAIL_TO || "")
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        subject: `Nouvelle commande payée - ${amountTotal / 100} ${currency}`,
-        text: [
-          `Paiement confirmé (Stripe Checkout).`,
-          ``,
-          `Email client: ${customerEmail || "non fourni"}`,
-          `Session Stripe: ${session.id}`,
-          `Montant: ${amountTotal / 100} ${currency}`,
-          ``,
-          `Récap des pièces:`,
-          piecesText,
-          ``,
-          `JSON brut:`,
-          JSON.stringify(cartItems, null, 2)
-        ].join("\n")
-      });
+await resend.emails.send({
+  from: process.env.EMAIL_FROM || "KairoMod <contact@kairomod.fr>",
+  to: (process.env.EMAIL_TO || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  subject: `Nouvelle commande payée – ${amountTotal / 100} ${currency}`,
+  html
+});
     }
 
     return res.json({ received: true });
