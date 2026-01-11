@@ -88,4 +88,20 @@ export default async function handler(req, res) {
     console.error(e);
     return res.status(500).send("Webhook handler failed");
   }
+  const summary = formatOrderText(cartItems);
+
+await resend.emails.send({
+  from: process.env.EMAIL_FROM || "KairoMod <onboarding@resend.dev>",
+  to: (process.env.EMAIL_TO || "").split(",").map(s => s.trim()).filter(Boolean),
+  subject: `Nouvelle commande payée - ${amountTotal / 100} ${currency.toUpperCase()}`,
+  text:
+`Paiement confirmé.
+
+Email client: ${customerEmail || "non fourni"}
+Session Stripe: ${session.id}
+
+Récap des pièces:
+${summary}
+`
+});
 }
