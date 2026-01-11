@@ -1,0 +1,9 @@
+{
+  "name": "montres-backend",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "stripe": "^16.0.0"
+  }
+}
