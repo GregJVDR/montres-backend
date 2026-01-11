@@ -1,13 +1,9 @@
 import Stripe from "stripe";
-import { createClient } from "@supabase/supabase-js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 export default async function handler(req, res) {
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -19,51 +15,36 @@ export default async function handler(req, res) {
     const { cartItems, origin } = body || {};
 
     if (!origin) return res.status(400).json({ error: "origin manquant" });
-    if (!Array.isArray(cartItems) || cartItems.length === 0) {
-      return res.status(400).json({ error: "Panier vide" });
-    }
+    if (!Array.isArray(cartItems) || cartItems.length === 0) return res.status(400).json({ error: "Panier vide" });
 
+    // total en centimes (depuis ton front actuel)
     const amountTotal = cartItems.reduce((sum, item) => {
       const price = Number(item?.total);
       if (!Number.isFinite(price) || price <= 0) throw new Error("Prix invalide");
       return sum + Math.round(price * 100);
     }, 0);
 
-    // 1) Crée la commande en DB
-    const { data: order, error } = await supabase
-      .from("orders")
-      .insert({
-        amount_total: amountTotal,
-        currency: "eur",
-        status: "created",
-        cart_json: cartItems
-      })
-      .select()
-      .single();
+    // Stockage panier dans metadata (compact)
+    const cartCompact = JSON.stringify(cartItems);
 
-    if (error) throw error;
-
-    // 2) Crée session Stripe
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      line_items: [{
-        quantity: 1,
-        price_data: {
-          currency: "eur",
-          unit_amount: amountTotal,
-          product_data: { name: "Montre personnalisée" }
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: "eur",
+            unit_amount: amountTotal,
+            product_data: { name: "Montre personnalisée" }
+          }
         }
-      }],
+      ],
       success_url: `${origin}/success.html?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/cancel.html`,
-      metadata: { order_id: order.id }
+      metadata: {
+        cart: cartCompact
+      }
     });
-
-    // 3) Sauve l'ID Stripe
-    await supabase
-      .from("orders")
-      .update({ stripe_session_id: session.id })
-      .eq("id", order.id);
 
     return res.status(200).json({ url: session.url });
   } catch (e) {
