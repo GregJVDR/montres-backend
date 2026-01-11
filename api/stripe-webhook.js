@@ -1,5 +1,27 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { Resend } from "resend";
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+function formatOrderText(cartItems) {
+  // ton cart_json ressemble à un tableau avec 1 objet, mais on gère les 2 cas
+  const items = Array.isArray(cartItems) ? cartItems : [cartItems];
+
+  return items.map((item, idx) => {
+    const lines = [];
+    lines.push(`Article #${idx + 1}`);
+    lines.push(`Modèle: ${item.type || item.model || "?"}`);
+    lines.push(`Total: ${item.total ? item.total + " €" : "?"}`);
+    const el = item.elements || item; // selon ton json
+    lines.push(`Carrure: ${el.carrure || "?"}`);
+    lines.push(`Cadran: ${el.cadran || "?"}`);
+    lines.push(`Aiguilles: ${el.aiguilles || "?"}`);
+    lines.push(`Bracelet: ${el.bracelet || "?"}`);
+    lines.push(`Fond: ${el.fond || "?"}`);
+    lines.push(`Remontoir: ${el.remontoir || "?"}`);
+    return lines.join("\n");
+  }).join("\n\n");
+}
 
 export const config = {
   api: { bodyParser: false } // IMPORTANT pour vérifier la signature Stripe
